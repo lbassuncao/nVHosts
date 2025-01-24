@@ -1,6 +1,6 @@
 # nVHosts 0.4.1
 
-This is a simple script to manage Virtual Hosts using nGinx and PHP on Linux machines.
+This is a simple CLI App to manage Virtual Hosts using nGinx and PHP on Linux machines.
 
 ### 1) Configuration 
 
