@@ -1,6 +1,6 @@
 # nVHosts 0.4.1
 
-This a simple script to manage Virtual Hosts using nGinx and PHP on Linux machines.
+This is a simple script to manage Virtual Hosts using nGinx and PHP on Linux machines.
 
 ### 1) Configuration 
 
@@ -10,6 +10,7 @@ This a simple script to manage Virtual Hosts using nGinx and PHP on Linux machin
     c) sudo ln -s $(pwd)/nvhosts /usr/local/bin/
     d) cd ..
     e) sudo ln -s $(pwd)/templates /usr/local/bin/
+    f) restart your terminal
 
 ### 2) Test the Application
 
