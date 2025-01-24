@@ -44,7 +44,7 @@ PHP_VERSIONS=($(echo "${LGREPED}" | cut -c4-6));
     # VERSION AND TITLE
 #-------------------------------------------------------------------------------------------------------
 
-vhosts_version=0.8.1;
+vhosts_version=0.4.1;
 script_title="${PURPLE}nGinx VHosts${NC}";
 
 #-------------------------------------------------------------------------------------------------------
@@ -410,12 +410,8 @@ function create_v_host(){
 
     bash -c "mkdir -p ${TMP_FOLDER}";
 
-    if [[ -f "${CONF_FOLDER}/server.conf" ]];
-    then
-        MAIN_CONF="${CONF_FOLDER}/server.conf";
-    else
-        MAIN_CONF="${CONF_FOLDER}/Settings/server.conf";
-    fi
+    MAIN_CONF=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd);
+    MAIN_CONF="${MAIN_CONF}/templates/default.conf";
 
     printf "\n${script_title}\n";
 
