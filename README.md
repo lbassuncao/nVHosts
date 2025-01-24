@@ -4,7 +4,7 @@ This a simple script to manage Virtual Hosts using nGinx and PHP on Linux machin
 
 ### 1) Configuration 
 
-    a) clone de project
+    a) git clone https://github.com/lbassuncao/nVHosts.git
     b) cd nVHosts/src
     c) chmod +x nvhosts
     c) sudo ln -s $(pwd)/nvhosts /usr/local/bin/
@@ -15,14 +15,14 @@ This a simple script to manage Virtual Hosts using nGinx and PHP on Linux machin
 
     a) nvhosts
 
-    ![Initial Display](images/Terminal_01.png)
+![Initial Display](images/Terminal_01.png)
 
 ### 3) Create a Virtual Host
 
     a) follow the examples bellow
 
-    ![Initial Display](images/Terminal_02.png)
+![Configuring a vHost](images/Terminal_02.png)
 
 ### 3) Feel Free to Explore Other Options
 
-    ![Initial Display](images/Terminal_03.png)
+![Further Options](images/Terminal_03.png)
