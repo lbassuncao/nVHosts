@@ -12,9 +12,10 @@ trap "exit 1" INT TERM
 # CONFIGURATION & CONSTANTS
 #-------------------------------------------------------------------------------------------------------
 
-VHOSTS_VERSION="0.4.2"
+VHOSTS_VERSION="0.4.3"
 NGINX_LOGS_DIR='/var/log/nginx'
-DEV_BOX_F="/home/${USER}/DevBox"
+# DEV_BOX_F is unused in this version, but kept for reference or future use
+# DEV_BOX_F="/home/${USER}/DevBox"
 SITES_ENABLED="/etc/nginx/sites-enabled"
 SITES_AVAILABLE="/etc/nginx/sites-available"
 USER_CURRENT=$(whoami)
@@ -33,7 +34,7 @@ Yellow='\033[0;33m'
 Blue='\033[0;34m'
 Purple='\033[0;35m'
 Cyan='\033[0;36m'
-White='\033[0;37m'
+# White='\033[0;37m' # Unused
 Grey='\033[0;90m'
 
 # Bold
@@ -42,8 +43,8 @@ GreenB='\033[1;32m'
 YellowB='\033[1;33m'
 BlueB='\033[1;34m'
 PurpleB='\033[1;35m'
-CyanB='\033[1;36m'
-WhiteB='\033[1;37m'
+# CyanB='\033[1;36m' # Unused
+# WhiteB='\033[1;37m' # Unused
 
 # Semantic Mapping
 Col_Title="${PurpleB}"
@@ -85,8 +86,7 @@ function reload_nginx() {
 }
 
 function get_php_versions() {
-    # Optimized: Looks directly in /etc/php for FPM configurations instead of using slow 'apt list'
-    # Returns an array of versions (e.g., 7.4 8.0 8.1)
+    # Optimized: Looks directly in /etc/php for FPM configurations
     if [[ -d "/etc/php" ]]; then
         find /etc/php -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort -V | while read -r version; do
             if [[ -d "/etc/php/${version}/fpm" ]]; then
@@ -102,6 +102,18 @@ function check_root() {
         printf "\n%b - Sudo privileges are required for this operation.\n" "${Msg_Error}"
         exit 1
     fi
+}
+
+function get_filenames_in_dir() {
+    local dir="$1"
+    local -n arr_ref="$2"
+    
+    # Safe globbing instead of parsing ls
+    shopt -s nullglob
+    for file in "${dir}"/*; do
+        arr_ref+=("$(basename "${file}")")
+    done
+    shopt -u nullglob
 }
 
 #-------------------------------------------------------------------------------------------------------
@@ -130,24 +142,23 @@ function vhosts_help() {
 function list_v_hosts() {
     local ena_idx=0
     local ava_idx=0
+    local enabled_hosts=()
+    local available_hosts=()
     
-    # Use globbing safely or empty array if no files
-    shopt -s nullglob
-    local enabled_hosts=("${SITES_ENABLED}"/*)
-    local available_hosts=("${SITES_AVAILABLE}"/*)
-    shopt -u nullglob
+    get_filenames_in_dir "${SITES_ENABLED}" enabled_hosts
+    get_filenames_in_dir "${SITES_AVAILABLE}" available_hosts
 
     show_header
 
     printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
-    for path in "${available_hosts[@]}"; do
-        printf "\t%b%d:%b %s\n" "${Col_Accent}" "${ava_idx}" "${Col_Value}" "$(basename "${path}")"
+    for host in "${available_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Col_Accent}" "${ava_idx}" "${Col_Value}" "${host}"
         ((ava_idx++))
     done
 
     printf "\n%bList of Enabled VHosts%b\n\n" "${Green}" "${Reset}"
-    for path in "${enabled_hosts[@]}"; do
-        printf "\t%b%d:%b %s\n" "${Green}" "${ena_idx}" "${Col_Value}" "$(basename "${path}")"
+    for host in "${enabled_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Green}" "${ena_idx}" "${Col_Value}" "${host}"
         ((ena_idx++))
     done
 
@@ -163,10 +174,7 @@ function enable_v_host() {
     local ava_idx=0
     local available_hosts=()
     
-    # Populate array safely
-    if [[ -d "${SITES_AVAILABLE}" ]]; then
-        while IFS= read -r line; do available_hosts+=("${line}"); done < <(ls -A1 "${SITES_AVAILABLE}")
-    fi
+    get_filenames_in_dir "${SITES_AVAILABLE}" available_hosts
 
     show_header
     printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
@@ -210,9 +218,7 @@ function disable_v_host() {
     local ena_idx=0
     local enabled_hosts=()
 
-    if [[ -d "${SITES_ENABLED}" ]]; then
-        while IFS= read -r line; do enabled_hosts+=("${line}"); done < <(ls -A1 "${SITES_ENABLED}")
-    fi
+    get_filenames_in_dir "${SITES_ENABLED}" enabled_hosts
 
     show_header
     printf "\n%bList of Enabled VHosts%b\n\n" "${Green}" "${Reset}"
@@ -258,9 +264,7 @@ function open_v_host() {
     local editor_apps=(vi vim nano gedit code)
     local available_hosts=()
 
-    if [[ -d "${SITES_AVAILABLE}" ]]; then
-        while IFS= read -r line; do available_hosts+=("${line}"); done < <(ls -A1 "${SITES_AVAILABLE}")
-    fi
+    get_filenames_in_dir "${SITES_AVAILABLE}" available_hosts
 
     show_header
     printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
@@ -320,9 +324,7 @@ function remove_v_host() {
     local ava_idx=0
     local available_hosts=()
 
-    if [[ -d "${SITES_AVAILABLE}" ]]; then
-        while IFS= read -r line; do available_hosts+=("${line}"); done < <(ls -A1 "${SITES_AVAILABLE}")
-    fi
+    get_filenames_in_dir "${SITES_AVAILABLE}" available_hosts
 
     show_header
     printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
@@ -350,8 +352,7 @@ function remove_v_host() {
     fi
 
     local filename="${host_to_remove%.*}"
-    printf "\n%bRemoving Virtual Host '%s'...
-" "${Col_Accent}" "${host_to_remove}"
+    printf "\n%bRemoving Virtual Host '%s'...\n"
 
     [[ -f "${SITES_ENABLED}/${host_to_remove}" ]] && sudo rm "${SITES_ENABLED}/${host_to_remove}"
     [[ -f "${SITES_AVAILABLE}/${host_to_remove}" ]] && sudo rm "${SITES_AVAILABLE}/${host_to_remove}"
@@ -388,7 +389,8 @@ function create_v_host() {
     printf "\n%bCreating New Virtual Host%b\n\n" "${Green}" "${Reset}"
 
     # PHP Versions
-    local php_versions=($(get_php_versions))
+    local php_versions=()
+    mapfile -t php_versions < <(get_php_versions)
     
     if [[ ${#php_versions[@]} -eq 0 ]]; then
         printf "\n%b - No PHP-FPM versions found in /etc/php/.\n" "${Msg_Error}"
@@ -405,7 +407,8 @@ function create_v_host() {
         exit 1
     fi
 
-    if grep -q "${project_port}" "${SITES_AVAILABLE}"/* 2>/dev/null; then
+    # Safe grep without expanding globs in shell
+    if grep -r -q "${project_port}" "${SITES_AVAILABLE}" 2>/dev/null; then
          printf "\n%b - Port %s is likely already in use in existing configs.\n" "${Msg_Error}" "${project_port}"
          exit 1
     fi
