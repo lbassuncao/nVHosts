@@ -1,580 +1,509 @@
 #!/bin/bash
 
 #-------------------------------------------------------------------------------------------------------
-    # Author - Luís Assunção | assunluis80@gmail.com
+# Author - Luís Assunção | assunluis80@gmail.com
+# Refactored for Performance & Consistency
 #-------------------------------------------------------------------------------------------------------
 
-NB=' ';
-ERROR=1;
-SUCCESS=0;
-USER=$(whoami);
+# Trap interrupts to exit cleanly
+trap "exit 1" INT TERM
 
 #-------------------------------------------------------------------------------------------------------
-    # VARIABLES
+# CONFIGURATION & CONSTANTS
 #-------------------------------------------------------------------------------------------------------
 
-NC='\033[0m';
-RED='\033[0;31m';
-REDB='\033[1;31m'; # RED AND BOLD
-CYAN='\033[0;36m';
-CYANB='\033[1;36m'; # CYAN AND BOLD
-BLUE='\033[0;34m';
-BLUEB='\033[1;34m'; # BLUE AND BOLD
-GREEN='\033[0;32m';
-GREENB='\033[1;32m'; # GREEN AND BOLD
-GREY='\033[0;37m';
-GREYB='\033[1;37m'; # GREY AND BOLD
-PURPLE='\033[0;35m';
-PURPLEB='\033[1;35m'; # PURPLE AND BOLD
-YELLOW='\033[0;33m';
-YELLOWB='\033[1;33m'; # YELLOW AND BOLD
-
-SCRIPT_TITLE="Virtual Host";
-NGINX_LOGS_DIR='/var/log/nginx';
-DEV_BOX_F="/home/${USER}/DevBox";
-SITES_ENABLED="/etc/nginx/sites-enabled";
-SITES_AVAILABLE="/etc/nginx/sites-available";
-
-V_RGX="php[5-9].[0-9]-fpm";
-L_V=$(apt list --installed 2>/dev/null);
-LGREPED=$(echo "${L_V}" | grep "${V_RGX}");
-PHP_VERSIONS=($(echo "${LGREPED}" | cut -c4-6));
+VHOSTS_VERSION="0.4.2"
+NGINX_LOGS_DIR='/var/log/nginx'
+DEV_BOX_F="/home/${USER}/DevBox"
+SITES_ENABLED="/etc/nginx/sites-enabled"
+SITES_AVAILABLE="/etc/nginx/sites-available"
+USER_CURRENT=$(whoami)
 
 #-------------------------------------------------------------------------------------------------------
-    # VERSION AND TITLE
+# PALETTE & STYLING
 #-------------------------------------------------------------------------------------------------------
 
-vhosts_version=0.4.1;
-script_title="${PURPLE}nGinx VHosts${NC}";
+# Reset
+Reset='\033[0m'
+
+# Regular Colors
+Red='\033[0;31m'
+Green='\033[0;32m'
+Yellow='\033[0;33m'
+Blue='\033[0;34m'
+Purple='\033[0;35m'
+Cyan='\033[0;36m'
+White='\033[0;37m'
+Grey='\033[0;90m'
+
+# Bold
+RedB='\033[1;31m'
+GreenB='\033[1;32m'
+YellowB='\033[1;33m'
+BlueB='\033[1;34m'
+PurpleB='\033[1;35m'
+CyanB='\033[1;36m'
+WhiteB='\033[1;37m'
+
+# Semantic Mapping
+Col_Title="${PurpleB}"
+Col_Option="${Blue}"
+Col_Key="${Cyan}"
+Col_Value="${Grey}"
+Col_Accent="${Yellow}"
+
+Msg_Error="${RedB}[ERROR]${Reset}"
+Msg_Success="${GreenB}[OK]${Reset}"
+Msg_Warn="${YellowB}[WARNING]${Reset}"
+Msg_Info="${BlueB}[INFO]${Reset}"
+
+SCRIPT_TITLE="${Col_Title}nGinx VHosts${Reset}"
 
 #-------------------------------------------------------------------------------------------------------
-    # PRINT VHOSTS VERSION
+# HELPER FUNCTIONS
 #-------------------------------------------------------------------------------------------------------
 
-function show_version(){
-    printf "\n${CYAN}nGinx VHosts${NC} - Version: ${YELLOW}${vhosts_version}${NC}${VERSION}\n";
+function show_header() {
+    clear
+    printf "\n%b\n" "${SCRIPT_TITLE}"
+}
+
+function show_version() {
+    printf "\n%b - Version: %b%s%b\n" "${SCRIPT_TITLE}" "${Col_Accent}" "${VHOSTS_VERSION}" "${Reset}"
+}
+
+function reload_nginx() {
+    local result
+    result=$(sudo service nginx reload 2>&1)
+    
+    if [[ -n "${result}" ]]; then
+        printf "\n%b - %s\n" "${Msg_Error}" "nGinx Server Was Unable to Reload."
+        printf "%s\n" "${result}"
+        return 1
+    fi
+    return 0
+}
+
+function get_php_versions() {
+    # Optimized: Looks directly in /etc/php for FPM configurations instead of using slow 'apt list'
+    # Returns an array of versions (e.g., 7.4 8.0 8.1)
+    if [[ -d "/etc/php" ]]; then
+        find /etc/php -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort -V | while read -r version; do
+            if [[ -d "/etc/php/${version}/fpm" ]]; then
+                echo "${version}"
+            fi
+        done
+    fi
+}
+
+function check_root() {
+    # Ensures sudo functionality is available
+    if ! sudo -v; then
+        printf "\n%b - Sudo privileges are required for this operation.\n" "${Msg_Error}"
+        exit 1
+    fi
 }
 
 #-------------------------------------------------------------------------------------------------------
-    # VHOSTS_HELP FUNCTION
+# HELP MENU
 #-------------------------------------------------------------------------------------------------------
 
-function vhosts_help(){
-    printf "\n${PURPLE}Usage: ${NC}${0##*/} ${NC}[${CYAN}-option ${YELLOW}|${BLUE} --longoption${NC}]";
-    printf "\n\n${YELLOW}Options:${NC}\n\n";
-    echo -e "\t[${CYAN}-c${YELLOW} | ${BLUE}--create${NC}]   ${PURPLE}=>${GREY}\tCreate a VHost";
-    echo -e "\t[${CYAN}-e${YELLOW} | ${BLUE}--enable${NC}]   ${PURPLE}=>${GREY}\tEnable a VHost";
-    echo -e "\t[${CYAN}-d${YELLOW} | ${BLUE}--disable${NC}]  ${PURPLE}=>${GREY}\tDisable a VHost";
-    echo -e "\t[${CYAN}-v${YELLOW} | ${BLUE}--view${NC}]     ${PURPLE}=>${GREY}\tView or Edit a VHost";
-    echo -e "\t[${CYAN}-r${YELLOW} | ${BLUE}--remove${NC}]   ${PURPLE}=>${GREY}\tRemove a VHost\n";
-    echo -e "\t[${CYAN}-V${YELLOW} | ${BLUE}--version${NC}]  ${PURPLE}=>${GREY}\tShow Binary Version";
-    echo -e "\t[${CYAN}-l${YELLOW} | ${BLUE}--list${NC}]     ${PURPLE}=>${GREY}\tList All Virtual Hosts";
-    echo -e "\t[${CYAN}-h${YELLOW} | ${BLUE}--help${NC}]     ${PURPLE}=>${GREY}\tDisplay Help with this Script";
+function vhosts_help() {
+    printf "\n%bUsage: %b %s %b[%b-option %b|%b --longoption%b]\n" "${Col_Title}" "${Reset}" "${0##*/}" "${Reset}" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}"
+    printf "\n%bOptions:%b\n\n" "${Col_Accent}" "${Reset}"
+    
+    printf "\t[%b-c%b | %b--create%b]   %b=>%b\tCreate a VHost\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\t[%b-e%b | %b--enable%b]   %b=>%b\tEnable a VHost\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\t[%b-d%b | %b--disable%b]  %b=>%b\tDisable a VHost\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\t[%b-v%b | %b--view%b]     %b=>%b\tView or Edit a VHost\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\t[%b-r%b | %b--remove%b]   %b=>%b\tRemove a VHost\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\t[%b-V%b | %b--version%b]  %b=>%b\tShow Binary Version\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\t[%b-l%b | %b--list%b]     %b=>%b\tList All Virtual Hosts\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\t[%b-h%b | %b--help%b]     %b=>%b\tDisplay Help\n" "${Col_Key}" "${Col_Accent}" "${Col_Option}" "${Reset}" "${Col_Title}" "${Col_Value}"
+    printf "\n"
 }
 
 #-------------------------------------------------------------------------------------------------------
-    # LIST_V_HOSTS BODY
+# LIST HOSTS
 #-------------------------------------------------------------------------------------------------------
 
-function list_v_hosts(){
-
-    ENA_IDX=0;
-    AVA_IDX=0;
-
-    ENABLED_HOSTS=($(ls -A1 "${SITES_ENABLED}"));
-    AVAILABLE_HOSTS=($(ls -A1 "${SITES_AVAILABLE}"));
-
-    printf "\n${script_title}\n";
-
-    printf "\n${YELLOW}List of Available VHosts${NC}\n\n";
-
-    for availableHost in ${AVAILABLE_HOSTS[@]};
-    do
-        printf "\t${YELLOW}${AVA_IDX}:${GREY} ${availableHost}\n"
-        AVA_IDX=$(expr $AVA_IDX + 1);
-    done;
-
-    printf "\n${GREEN}List of Enabled VHosts${NC}\n\n";
-
-    for enabledHost in ${ENABLED_HOSTS[@]};
-    do
-        printf "\t${GREEN}${ENA_IDX}:${GREY} ${enabledHost}\n"
-        ENA_IDX=$(expr $ENA_IDX + 1);
-    done;
-
-    exit $SUCCESS;
-}
-
-#-------------------------------------------------------------------------------------------------------
-    # php_version_not_found_on_the_system BODY
-#-------------------------------------------------------------------------------------------------------
-
-function php_version_not_found_on_the_system(){
-    printf "\n${REDB}[ERROR]${RED} - PHP Version NOT FOUND on the System! Resuming.${NC}\n";
-}
-
-#-------------------------------------------------------------------------------------------------------
-    # ENABLE_V_HOST BODY
-#-------------------------------------------------------------------------------------------------------
-
-function enable_v_host(){
-
-    sudo -k;
-    AVA_IDX=0;
-    AVAILABLE_HOSTS=($(ls -A1 "${SITES_AVAILABLE}"));
-
-    printf "\n${script_title}\n";
-
-    printf "\n${YELLOW}List of Available VHosts${NC}\n\n";
-
-    for availableHost in ${AVAILABLE_HOSTS[@]};
-    do
-        printf "\t${YELLOW}${AVA_IDX}:${GREY} ${availableHost}\n"
-        AVA_IDX=$(expr $AVA_IDX + 1);
-    done;
-
-    printf "\n${CYAN}";
-    printf "From the List Above, Choose the VHost to enabled [INDEX]:${NC} ";
-
-    read VHOST_FILE; VHOST_TO_ENABLE="${AVAILABLE_HOSTS[$VHOST_FILE]}";
-
-    if [[ -z "${VHOST_FILE}" ]] || [[ -z "${VHOST_TO_ENABLE}" ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - Provide a Valid VHost File [INDEX] to be Enabled!\n";
-        exit $ERROR;
-    fi;
-
-    if [[ -f "${SITES_ENABLED}/${VHOST_TO_ENABLE}" ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - The VHost '${YELLOW}${VHOST_TO_ENABLE}${RED}' is Already Enabled!\n";
-        exit $ERROR;
-    fi;
-
-    printf "\n";
-
-    sudo ln -s "${SITES_AVAILABLE}/${VHOST_TO_ENABLE}" "${SITES_ENABLED}/${VHOST_TO_ENABLE}"
-
-    RESULT=$(sudo service nginx reload 2>&1);
-
-    if [[ ! -z "${RESULT}" ]];
-    then
-        printf "\n${RED}${RESULT}${NC}\n";
-        printf "\n${REDB}[ERROR] - nGinx Server Was Unable to Reload the Service.${NC}\n";
-        exit $ERROR;
-    fi
-
-    printf "\n${GREENB}[OK]${GREEN} - The VHost '${YELLOW}${VHOST_TO_ENABLE}${GREEN}' was Enabled with Success. \n";
-
-    exit $SUCCESS;
-}
-
-#-------------------------------------------------------------------------------------------------------
-    # disable_v_host BODY
-#-------------------------------------------------------------------------------------------------------
-
-function disable_v_host(){
-
-    sudo -k;
-    ENA_IDX=0;
-    ENABLED_HOSTS=($(ls -A1 "${SITES_ENABLED}"));
-
-    printf "\n${script_title}\n";
-
-    printf "\n${GREEN}List of Enabled VHosts${NC}\n\n";
-
-    for enabledHost in ${ENABLED_HOSTS[@]};
-    do
-        printf "\t${GREEN}${ENA_IDX}:${GREY} ${enabledHost}\n"
-        ENA_IDX=$(expr $ENA_IDX + 1);
-    done;
-
-    printf "\n${CYAN}From the List Above, Choose the VHost to Disable [INDEX]:${NC} ";
-
-    read VHOST_FILE; VHOST_TO_DISABLE="${ENABLED_HOSTS[$VHOST_FILE]}";
-
-    if [[ -z "${VHOST_FILE}" ]] || [[ -z "${VHOST_TO_DISABLE}" ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - Provide a Valid VHost File [INDEX] to be Disabled!\n";
-        exit $ERROR;
-    fi;
-
-    if [[ ! -f "${SITES_ENABLED}/${VHOST_TO_DISABLE}" ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - The VHost '${VHOST_TO_DISABLE}' is Already Disabled!\n";
-        exit $ERROR;
-    fi;
-
-    printf "\n";
-
-    sudo rm "${SITES_ENABLED}/${VHOST_TO_DISABLE}";
-
-    RESULT=$(sudo service nginx reload 2>&1);
-
-    if [[ ! -z "${RESULT}" ]];
-    then
-        printf "\n${RED}${RESULT}${NC}\n";
-        printf "\n${REDB}[ERROR]${RED} - nGinx Server Was Unable to Reload the Service.${NC}\n";
-        exit $ERROR;
-    fi
-
-    printf "\n${GREENB}[OK]${GREEN} - The VHost '${RED}${VHOST_TO_DISABLE}${GREEN}' was Disabled with Success.\n";
-
-    exit $SUCCESS;
-}
-
-#-------------------------------------------------------------------------------------------------------
-    # OPEN VHOST BODY
-#-------------------------------------------------------------------------------------------------------
-
-function open_v_host(){
-
-    sudo -k;
-    AVA_IDX=0;
-    APP_IDX=0;
-    EDITOR_APPS=(vi vim nano gedit);
-    AVAILABLE_HOSTS=($(ls -A1 "${SITES_AVAILABLE}"));
-
-    printf "\n${script_title}\n";
-
-    printf "\n${YELLOW}List of Available VHosts${NC}\n\n";
-
-    for availableHost in ${AVAILABLE_HOSTS[@]};
-    do
-        printf "\t${YELLOW}${AVA_IDX}:${GREY} ${availableHost}\n"
-        AVA_IDX=$(expr $AVA_IDX + 1);
-    done;
-
-    printf "\n${CYAN}From the List Above, Choose the VHost [INDEX]:${NC} ";
-
-    read VHOST_FILE; VHOST_TO_VIEW="${AVAILABLE_HOSTS[$VHOST_FILE]}";
-
-    if [[ -z "${VHOST_FILE}" ]] || [[ -z "${VHOST_TO_VIEW}" ]];
-    then
-        printf "\n${REDB}[ERROR]${REDB} - Provide a Valid VHost File [INDEX] to View.\n";
-        exit $ERROR;
-    fi;
-
-    printf "\n${BLUE}Choose the VHost Editor App\n\n";
-
-    for iniA in ${EDITOR_APPS[@]};
-    do
-        printf "\t${BLUE}${APP_IDX}: ${GREY}${iniA} editor\n";
-        APP_IDX=$(expr $APP_IDX + 1);
-    done;
-
-    printf "${CYAN}\nFrom the List Above, Choose the App to Use [INDEX]:${NC} ";
-
-    read APP_TO_USE; EDITOR_TO_USE=${EDITOR_APPS[APP_TO_USE]};
-
-    if [[ -z "${EDITOR_TO_USE}" ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - Please Choose a Valid Editor to Use!${NC}\n";
-        return $ERROR;
-    fi
-
-    printf "\n";
-
-    CMD_RESULT=$(which ${EDITOR_TO_USE});
-
-    if [[ -z "${CMD_RESULT}" ]];
-    then
-        printf "${REDB}[ERROR]${RED} - The Chosen Editor '${YELLOW}${EDITOR_TO_USE}${RED}' Was NOT FOUND on the System!${NC}\n";
-        return $ERROR;
-    fi
-
-    bash -c "sudo ${EDITOR_TO_USE} ${SITES_AVAILABLE}/${VHOST_TO_VIEW}";
-
-    printf "\n${GREEN}The VHost '${YELLOW}${VHOST_TO_VIEW}${GREEN}' Was Edited. Want to Reload (n/Y)?${NC} ";
-
-    read ENABLE_HOST;
-
-    if [ "${ENABLE_HOST}" != "n" ] && [ "${ENABLE_HOST}" != "N" ];
-    then
-        RESULT=$(sudo service nginx reload 2>&1);
-
-        if [[ ! -z "${RESULT}" ]];
-        then
-            printf "\n${RED}${RESULT}${NC}\n";
-            printf "\n${RED}[ERROR]${RED} - nGinx Server Was Unable to Reload the Service After File Edit.${NC}\n";
-            exit $ERROR;
-        fi
-
-        printf "\n${GREENB}[OK]${GREEN} - The VHost '${YELLOW}${VHOST_TO_VIEW}${GREEN}' Was Edited with Success. Server Reloaded.${NC}\n";
-    fi
-
-    exit $SUCCESS;
-}
-
-#-------------------------------------------------------------------------------------------------------
-    # REMOVE_V_HOST BODY
-#-------------------------------------------------------------------------------------------------------
-
-function remove_v_host(){
-
-    sudo -k;
-    AVA_IDX=0;
-    VHOST_FILES=($(ls -A1 "${SITES_AVAILABLE}"));
-
-    printf "\n${script_title}\n";
-
-    printf "\n${YELLOW}List of Available VHosts${NC}\n\n";
-
-    for vHostFile in ${VHOST_FILES[@]};
-    do
-        printf "\t${YELLOW}${AVA_IDX}: ${GREY}${vHostFile}\n"
-        AVA_IDX=$(expr $AVA_IDX + 1);
-    done;
-
-    printf "\n${CYAN}From the List Above, Choose the VHost [INDEX] to Remove:${NC} ";
-
-    read HOST_FILE; HOST_TO_REMOVE="${VHOST_FILES[$HOST_FILE]}";
-
-    if [[ -z "${HOST_FILE}" ]] || [[ -z "${HOST_TO_REMOVE}" ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - You Must Provide the VHost [INDEX] to be Removed!\n";
-        exit $ERROR;
-    fi;
-
-    printf "${RED}"
-    printf "\nDo You Really Want to Remove the VHost '${GREEN}${HOST_TO_REMOVE}${RED}' ";
-    printf "(N/y): ${NC}"; read R_ANSWER;
-
-    if [[ -z "${R_ANSWER}" ]] || [[ "${R_ANSWER}" == 'n' ]] || [[ "${R_ANSWER}" == 'N' ]]
-    then
-        printf "\n${YELLOWB}[WARNING]${YELLOW} - The VHost: '${GREEN}${HOST_TO_REMOVE}${YELLOW}' Was NOT REMOVED. Resuming.\n";
-        exit $ERROR;
-    fi;
-
-    if [[ ! -z "${HOST_FILE}" ]] && [[ ! -z ${HOST_TO_REMOVE} ]];
-    then
-
-        FILENAME="${HOST_TO_REMOVE%.*}";
-
-        printf "\n${YELLOW}Removing Virtual Host '${RED}${HOST_TO_REMOVE}${YELLOW}' From the System...${NC}\n\n";
-
-        if [[ -f "${SITES_ENABLED}/${HOST_TO_REMOVE}" ]];
-        then
-            sudo rm "${SITES_ENABLED}/${HOST_TO_REMOVE}";
-        fi;
-
-        if [[ -f "${SITES_AVAILABLE}/${HOST_TO_REMOVE}" ]];
-        then
-            sudo rm "${SITES_AVAILABLE}/${HOST_TO_REMOVE}";
-        fi;
-
-        if [[ -f "${NGINX_LOGS_DIR}/${FILENAME}_errors.log" ]];
-        then
-            sudo rm "${NGINX_LOGS_DIR}/${FILENAME}_errors.log";
-        fi;
-
-        if [[ -f "${NGINX_LOGS_DIR}/${FILENAME}_access.log" ]];
-        then
-            sudo rm "${NGINX_LOGS_DIR}/${FILENAME}_access.log";
-        fi;
-
-        RESULT=$(sudo service nginx reload 2>&1);
-
-        if [[ ! -z "${RESULT}" ]];
-        then
-            printf "\n${RED}${RESULT}${NC}\n";
-            printf "\n${REDB}[ERROR] - nGinx Server Was Unable to Reload the Service.${NC}\n";
-            exit $ERROR;
-        fi
-
-        printf "\n${GREENB}[OK]${GREEN} - The Virtual Host: '${YELLOW}${HOST_TO_REMOVE}${GREEN}' was Removed with Success.${NC}\n";
-
-    else
-        printf "\n${REDB}[ERROR]${RED} - The Provided VHost: Doesn't Exists on this System! Resuming.${NC}\n";
-        exit $ERROR;
-    fi
-
-    exit $SUCCESS;
-}
-
-#-------------------------------------------------------------------------------------------------------
-    # CREATE_V_HOST BODY
-#-------------------------------------------------------------------------------------------------------
-
-function create_v_host(){
-
-    sudo -k;
-    SCR_IDX=0;
-    VER_IDX=0;
-    MIN_PORT_NUM=2000;
-    S="${REDB}|${YELLOW}";
-    GREP_NAME="^[a-z0-9]*$";
-    V_RGX="php[5-9].[0-9]-fpm";
-    ASSETS_DIR="static/assets";
-    TMP_FOLDER="/tmp/TempHosts";
-    CONF_FOLDER="${DEV_BOX_F}/Configs/Servers";
-
-    bash -c "mkdir -p ${TMP_FOLDER}";
-
-    MAIN_CONF=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd);
-    MAIN_CONF="${MAIN_CONF}/templates/default.conf";
-
-    printf "\n${script_title}\n";
-
-    printf "\n${GREEN}Creating ${SCRIPT_TITLE}${NC}\n\n";
-
-    # get installed PHP PHP_VERSIONS
-    # PHP_VERSIONS=$(apt list --installed 2>/dev/null | grep "${V_RGX}" | cut -c4-6);
-
-    # separte different version with a pipe "|"
-    CLEAN_PHP_VERSIONS=$(echo $PHP_VERSIONS | tr ' ' '|');
-
-    printf "${CYAN}PROJECT PORT${NC} = ";
-
-    # trim the argument using "xargs"
-    read PROJECT_PORT; PROJECT_PORT=$(echo $PROJECT_PORT | xargs);
-
-    # check minimum port number, for the host
-    if  [[ -z "${PROJECT_PORT}" ]] || [[ "${PROJECT_PORT}" -le $MIN_PORT_NUM ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - The Server PORT Must be Greater than ${MIN_PORT_NUM}.";
-        printf "${NC}\n"; exit $ERROR;
-    fi
-
-    # check uf the port is in use
-    IS_PORT_IN_USE=$(ls -l ${SITES_AVAILABLE} | grep ${PROJECT_PORT});
-
-    if [ ! -z "${IS_PORT_IN_USE}" ];
-    then
-        printf "\n${REDB}[ERROR]${RED} - The Provided Server PORT is Already in Use! Resuming.";
-        printf "${NC}\n"
-        exit $ERROR;
-    fi
-
-    printf "${CYAN}PROJECT NAME${NC} = ";
-
-    read PROJECT_NAME; PROJECT_NAME=$(echo $PROJECT_NAME | xargs);
-
-    if [[ -z "${PROJECT_NAME}" ]];
-    then
-        printf "\n${REDB}[ERROR]${RED} - The Project NAME Cannot be Empty! Resuming.${NC}\n";
-        exit $ERROR;
-    fi
-
-    PROJECT_NAME=$(echo "${PROJECT_NAME}" | tr '[:upper:]' '[:lower:]');
-
-    if ! grep -q "${GREP_NAME}" <<< $PROJECT_NAME;
-        then
-        printf "\n${REDB}[ERROR]${RED} - The Provided Project NAME is Invalid! Resuming.${NC}\n";
-        exit $ERROR;
-    fi
-
-    printf "\n${YELLOW}List of PHP Versions\n\n";
-
-    for phpV in ${PHP_VERSIONS[@]};
-    do
-        printf "\t${YELLOW}${VER_IDX}: ${GREY}Version ${phpV}\n";
-        VER_IDX=$(expr $VER_IDX + 1);
-    done;
-
-    printf "\n${PURPLE}From the List Above, Choose the Version [INDEX]${NC}: ";
-
-    read PHP_VERSION; PHP_VERSION=$(echo $PHP_VERSION | xargs);
-
-    if [[ -z "${PHP_VERSION}" ]] || [[ -z ${PHP_VERSIONS[$PHP_VERSION]} ]];
-    then php_version_not_found_on_the_system; exit $ERROR; fi
-
-    printf "\n${CYAN}FULL PATH TO WEBROOT${NC} = ";
-
-    # replace the dot with underscore in Version
-    PHP_V_UNDS=$(echo "${PHP_VERSIONS[$PHP_VERSION]}" | tr . _);
-
-    read FULL_PATH_TO_WEBROOT;
-
-    FULL_PATH_TO_WEBROOT=$(echo $FULL_PATH_TO_WEBROOT | xargs);
-
-    if [ -z "${FULL_PATH_TO_WEBROOT}" ];
-    then
-        printf "\n${REDB}[ERROR] - You Must Provide the Project PATH to Continue. resuming.${NC}\n";
-        exit $ERROR;
-    fi
-
-    TMP_CONF_FILE_NAME="${PROJECT_NAME}_${PROJECT_PORT}_${PHP_V_UNDS}.vhost";
-
-    cp "${MAIN_CONF}" "${TMP_FOLDER}/${TMP_CONF_FILE_NAME}";
-
-    PLACEHOLDERS=("#{port}" "#{host}" "#{php_version}" "#{project_path}" "#{app_log}" "#{sys_user}");
-
-    SCRIPT_VARIABLES=(
-        "${PROJECT_PORT}
-        ${PROJECT_NAME} ${PHP_VERSIONS[$PHP_VERSION]} ${FULL_PATH_TO_WEBROOT} ${PHP_V_UNDS} ${USER}"
-    );
-
-    for confVar in ${SCRIPT_VARIABLES[@]};
-    do
-        # echo $SCR_IDX;
-        # printf "${PLACEHOLDERS[$SCR_IDX]} ${confVar}\n";
-        sed -i -e "s|${PLACEHOLDERS[$SCR_IDX]}|${confVar}|g" "${TMP_FOLDER}/${TMP_CONF_FILE_NAME}";
-        SCR_IDX=$(expr $SCR_IDX + 1);
+function list_v_hosts() {
+    local ena_idx=0
+    local ava_idx=0
+    
+    # Use globbing safely or empty array if no files
+    shopt -s nullglob
+    local enabled_hosts=("${SITES_ENABLED}"/*)
+    local available_hosts=("${SITES_AVAILABLE}"/*)
+    shopt -u nullglob
+
+    show_header
+
+    printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
+    for path in "${available_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Col_Accent}" "${ava_idx}" "${Col_Value}" "$(basename "${path}")"
+        ((ava_idx++))
     done
 
-    printf "\n";
+    printf "\n%bList of Enabled VHosts%b\n\n" "${Green}" "${Reset}"
+    for path in "${enabled_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Green}" "${ena_idx}" "${Col_Value}" "$(basename "${path}")"
+        ((ena_idx++))
+    done
 
-    IS_NGINX_CONFIG_OK=$(sudo nginx -t 2>&1 | grep failed);
+    exit 0
+}
 
-    if [ ! -z "${IS_NGINX_CONFIG_OK}" ];
-    then
-        rm -f "${TMP_FOLDER}/${TMP_CONF_FILE_NAME}";
-        printf "\n${REDB}${IS_NGINX_CONFIG_OK}...${NC}\n";
-        printf "\n${REDB}[ERROR] - The General Server VHost Config has Failed! Resuming.${NC}\n";
-        printf "\n${REDB}[ERROR] - Please Check the Directory: '${SITES_ENABLED}' for Errors.${NC}\n";
-        exit $ERROR;
+#-------------------------------------------------------------------------------------------------------
+# ENABLE HOST
+#-------------------------------------------------------------------------------------------------------
+
+function enable_v_host() {
+    check_root
+    local ava_idx=0
+    local available_hosts=()
+    
+    # Populate array safely
+    if [[ -d "${SITES_AVAILABLE}" ]]; then
+        while IFS= read -r line; do available_hosts+=("${line}"); done < <(ls -A1 "${SITES_AVAILABLE}")
     fi
 
-    sudo mv "${TMP_FOLDER}/${TMP_CONF_FILE_NAME}" ${SITES_AVAILABLE};
+    show_header
+    printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
 
-    printf "\n${GREEN}Virtual Host Created with Success. Want to Enable It? (n/Y): ${NC}";
+    for host in "${available_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Col_Accent}" "${ava_idx}" "${Col_Value}" "${host}"
+        ((ava_idx++))
+    done
 
-    read ENABLE_HOST;
+    printf "\n%bFrom the List Above, Choose the VHost to enable [INDEX]:%b " "${Col_Key}" "${Reset}"
+    read -r vhost_idx
 
-    if [ "${ENABLE_HOST}" != "n" ] && [ "${ENABLE_HOST}" != "N" ];
+    local vhost_to_enable="${available_hosts[$vhost_idx]}"
 
-    then
-        sudo ln -s "${SITES_AVAILABLE}/${TMP_CONF_FILE_NAME}" "${SITES_ENABLED}/${TMP_CONF_FILE_NAME}"
+    if [[ -z "${vhost_idx}" ]] || [[ -z "${vhost_to_enable}" ]]; then
+        printf "\n%b - Provide a Valid VHost Index!\n" "${Msg_Error}"
+        exit 1
+    fi
 
-        RESULT=$(sudo service nginx reload 2>&1);
+    if [[ -f "${SITES_ENABLED}/${vhost_to_enable}" ]]; then
+        printf "\n%b - The VHost '%b%s%b' is Already Enabled!\n" "${Msg_Warn}" "${Col_Accent}" "${vhost_to_enable}" "${Reset}"
+        exit 1
+    fi
 
-        if [[ ! -z "${RESULT}" ]];
-        then
-            printf "\n${RED}${RESULT}${NC}\n";
-            printf "\n${REDB}[ERROR]${RED} - nGinx Server Was Unable to Reload the Service.${NC}\n";
-            exit $ERROR;
+    printf "\n"
+    sudo ln -s "${SITES_AVAILABLE}/${vhost_to_enable}" "${SITES_ENABLED}/${vhost_to_enable}"
+
+    if reload_nginx; then
+        printf "\n%b - The VHost '%b%s%b' was Enabled with Success.\n" "${Msg_Success}" "${Col_Accent}" "${vhost_to_enable}" "${Reset}"
+    else
+        exit 1
+    fi
+}
+
+#-------------------------------------------------------------------------------------------------------
+# DISABLE HOST
+#-------------------------------------------------------------------------------------------------------
+
+function disable_v_host() {
+    check_root
+    local ena_idx=0
+    local enabled_hosts=()
+
+    if [[ -d "${SITES_ENABLED}" ]]; then
+        while IFS= read -r line; do enabled_hosts+=("${line}"); done < <(ls -A1 "${SITES_ENABLED}")
+    fi
+
+    show_header
+    printf "\n%bList of Enabled VHosts%b\n\n" "${Green}" "${Reset}"
+
+    for host in "${enabled_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Green}" "${ena_idx}" "${Col_Value}" "${host}"
+        ((ena_idx++))
+    done
+
+    printf "\n%bFrom the List Above, Choose the VHost to Disable [INDEX]:%b " "${Col_Key}" "${Reset}"
+    read -r vhost_idx
+
+    local vhost_to_disable="${enabled_hosts[$vhost_idx]}"
+
+    if [[ -z "${vhost_idx}" ]] || [[ -z "${vhost_to_disable}" ]]; then
+        printf "\n%b - Provide a Valid VHost Index!\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    if [[ ! -f "${SITES_ENABLED}/${vhost_to_disable}" ]]; then
+        printf "\n%b - The VHost is already disabled or does not exist.\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    printf "\n"
+    sudo rm "${SITES_ENABLED}/${vhost_to_disable}"
+
+    if reload_nginx; then
+        printf "\n%b - The VHost '%b%s%b' was Disabled with Success.\n" "${Msg_Success}" "${Col_Accent}" "${vhost_to_disable}" "${Reset}"
+    else
+        exit 1
+    fi
+}
+
+#-------------------------------------------------------------------------------------------------------
+# VIEW / EDIT HOST
+#-------------------------------------------------------------------------------------------------------
+
+function open_v_host() {
+    check_root
+    local ava_idx=0
+    local app_idx=0
+    local editor_apps=(vi vim nano gedit code)
+    local available_hosts=()
+
+    if [[ -d "${SITES_AVAILABLE}" ]]; then
+        while IFS= read -r line; do available_hosts+=("${line}"); done < <(ls -A1 "${SITES_AVAILABLE}")
+    fi
+
+    show_header
+    printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
+
+    for host in "${available_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Col_Accent}" "${ava_idx}" "${Col_Value}" "${host}"
+        ((ava_idx++))
+    done
+
+    printf "\n%bFrom the List Above, Choose the VHost [INDEX]:%b " "${Col_Key}" "${Reset}"
+    read -r vhost_idx
+    local vhost_to_view="${available_hosts[$vhost_idx]}"
+
+    if [[ -z "${vhost_idx}" ]] || [[ -z "${vhost_to_view}" ]]; then
+        printf "\n%b - Provide a Valid VHost Index.\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    printf "\n%bChoose the VHost Editor App%b\n\n" "${Col_Option}" "${Reset}"
+    for app in "${editor_apps[@]}"; do
+        printf "\t%b%d: %b%s\n" "${Col_Option}" "${app_idx}" "${Col_Value}" "${app}"
+        ((app_idx++))
+    done
+
+    printf "\n%bFrom the List Above, Choose the App to Use [INDEX]:%b " "${Col_Key}" "${Reset}"
+    read -r app_to_use_idx
+    local editor_to_use=${editor_apps[$app_to_use_idx]}
+
+    if [[ -z "${editor_to_use}" ]]; then
+        printf "\n%b - Invalid Editor Selection.\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    if ! command -v "${editor_to_use}" &> /dev/null; then
+        printf "\n%b - Editor '%s' NOT FOUND on the system.\n" "${Msg_Error}" "${editor_to_use}"
+        exit 1
+    fi
+
+    sudo "${editor_to_use}" "${SITES_AVAILABLE}/${vhost_to_view}"
+
+    printf "\n%bThe VHost was edited. Want to Reload? (n/Y):%b " "${Col_Key}" "${Reset}"
+    read -r reload_ans
+
+    if [[ "${reload_ans}" != "n" && "${reload_ans}" != "N" ]]; then
+        if reload_nginx; then
+            printf "\n%b - VHost edited and server reloaded.\n" "${Msg_Success}"
         fi
+    fi
+}
 
-        printf "\n${YELLOW}The new vHost can be accessed here: '${GREY}http://localhost:${PROJECT_PORT}${YELLOW}'. Enjoy!${NC}\n";
+#-------------------------------------------------------------------------------------------------------
+# REMOVE HOST
+#-------------------------------------------------------------------------------------------------------
 
-        printf "\n${GREENB}[OK]${GREEN} - VHost '${BLUE}${TMP_CONF_FILE_NAME}${GREEN}' Enabled. Server Reloaded with Success!${NC}\n";
+function remove_v_host() {
+    check_root
+    local ava_idx=0
+    local available_hosts=()
+
+    if [[ -d "${SITES_AVAILABLE}" ]]; then
+        while IFS= read -r line; do available_hosts+=("${line}"); done < <(ls -A1 "${SITES_AVAILABLE}")
     fi
 
-    exit $SUCCESS;
+    show_header
+    printf "\n%bList of Available VHosts%b\n\n" "${Col_Accent}" "${Reset}"
+
+    for host in "${available_hosts[@]}"; do
+        printf "\t%b%d:%b %s\n" "${Col_Accent}" "${ava_idx}" "${Col_Value}" "${host}"
+        ((ava_idx++))
+    done
+
+    printf "\n%bFrom the List Above, Choose the VHost to Remove [INDEX]:%b " "${Col_Key}" "${Reset}"
+    read -r host_idx
+    local host_to_remove="${available_hosts[$host_idx]}"
+
+    if [[ -z "${host_idx}" ]] || [[ -z "${host_to_remove}" ]]; then
+        printf "\n%b - You Must Provide the VHost Index.\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    printf "\n%bDo You Really Want to Remove '%s'? (N/y):%b " "${RedB}" "${host_to_remove}" "${Reset}"
+    read -r confirmation
+
+    if [[ "${confirmation}" == "n" || "${confirmation}" == "N" || -z "${confirmation}" ]]; then
+        printf "\n%b - Operation Cancelled.\n" "${Msg_Warn}"
+        exit 1
+    fi
+
+    local filename="${host_to_remove%.*}"
+    printf "\n%bRemoving Virtual Host '%s'...
+" "${Col_Accent}" "${host_to_remove}"
+
+    [[ -f "${SITES_ENABLED}/${host_to_remove}" ]] && sudo rm "${SITES_ENABLED}/${host_to_remove}"
+    [[ -f "${SITES_AVAILABLE}/${host_to_remove}" ]] && sudo rm "${SITES_AVAILABLE}/${host_to_remove}"
+    [[ -f "${NGINX_LOGS_DIR}/${filename}_errors.log" ]] && sudo rm "${NGINX_LOGS_DIR}/${filename}_errors.log"
+    [[ -f "${NGINX_LOGS_DIR}/${filename}_access.log" ]] && sudo rm "${NGINX_LOGS_DIR}/${filename}_access.log"
+
+    if reload_nginx; then
+        printf "\n%b - The VHost was Removed with Success.\n" "${Msg_Success}"
+    fi
 }
 
 #-------------------------------------------------------------------------------------------------------
-    # SCRIPT OPTIONS
+# CREATE HOST
 #-------------------------------------------------------------------------------------------------------
 
-function ngx_error(){
-    #echo -e "${0##*/}: ${RED}ERROR: $1${NC}"
-    printf "\n${RED}$1${NC}\n";
-    [[ "$2" ]] && vhosts_help;
+function create_v_host() {
+    check_root
+    local min_port_num=2000
+    local grep_name="^[a-z0-9]*$"
+    local tmp_folder="/tmp/TempHosts"
+    
+    mkdir -p "${tmp_folder}"
+
+    local script_dir
+    script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+    local main_conf="${script_dir}/../templates/default.conf"
+
+    # Fallback to local path if relative fails
+    if [[ ! -f "${main_conf}" ]]; then
+         main_conf="./templates/default.conf"
+    fi
+
+    show_header
+    printf "\n%bCreating New Virtual Host%b\n\n" "${Green}" "${Reset}"
+
+    # PHP Versions
+    local php_versions=($(get_php_versions))
+    
+    if [[ ${#php_versions[@]} -eq 0 ]]; then
+        printf "\n%b - No PHP-FPM versions found in /etc/php/.\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    # 1. Project Port
+    printf "%bPROJECT PORT%b = " "${Col_Key}" "${Reset}"
+    read -r project_port
+    project_port=$(echo "${project_port}" | xargs)
+
+    if [[ -z "${project_port}" ]] || [[ "${project_port}" -le $min_port_num ]]; then
+        printf "\n%b - Port must be greater than %d.\n" "${Msg_Error}" "${min_port_num}"
+        exit 1
+    fi
+
+    if grep -q "${project_port}" "${SITES_AVAILABLE}"/* 2>/dev/null; then
+         printf "\n%b - Port %s is likely already in use in existing configs.\n" "${Msg_Error}" "${project_port}"
+         exit 1
+    fi
+
+    # 2. Project Name
+    printf "%bPROJECT NAME%b = " "${Col_Key}" "${Reset}"
+    read -r project_name
+    project_name=$(echo "${project_name}" | xargs | tr '[:upper:]' '[:lower:]')
+
+    if [[ -z "${project_name}" ]] || ! [[ "${project_name}" =~ ${grep_name} ]]; then
+        printf "\n%b - Invalid Project Name (alphanumeric only).\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    # 3. PHP Version
+    printf "\n%bList of PHP Versions%b\n\n" "${Col_Accent}" "${Reset}"
+    local ver_idx=0
+    for phpV in "${php_versions[@]}"; do
+        printf "\t%b%d: %bVersion %s\n" "${Col_Accent}" "${ver_idx}" "${Col_Value}" "${phpV}"
+        ((ver_idx++))
+    done
+
+    printf "\n%bSelect PHP Version [INDEX]%b: " "${Col_Key}" "${Reset}"
+    read -r php_ver_idx
+    local selected_php_version="${php_versions[$php_ver_idx]}"
+
+    if [[ -z "${selected_php_version}" ]]; then
+        printf "\n%b - Invalid PHP Version selected.\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    # 4. Webroot
+    printf "\n%bFULL PATH TO WEBROOT%b = " "${Col_Key}" "${Reset}"
+    read -r full_path_to_webroot
+    full_path_to_webroot=$(echo "${full_path_to_webroot}" | xargs)
+
+    if [[ -z "${full_path_to_webroot}" ]]; then
+        printf "\n%b - Path cannot be empty.\n" "${Msg_Error}"
+        exit 1
+    fi
+
+    # Preparation
+    local php_v_unds
+    php_v_unds=$(echo "${selected_php_version}" | tr . _)
+    local tmp_conf_file="${project_name}_${project_port}_${php_v_unds}.vhost"
+    local tmp_file_path="${tmp_folder}/${tmp_conf_file}"
+
+    cp "${main_conf}" "${tmp_file_path}"
+
+    # Replacements
+    sed -i "s|#{port}|${project_port}|g" "${tmp_file_path}"
+    sed -i "s|#{host}|${project_name}|g" "${tmp_file_path}"
+    sed -i "s|#{php_version}|${selected_php_version}|g" "${tmp_file_path}"
+    sed -i "s|#{project_path}|${full_path_to_webroot}|g" "${tmp_file_path}"
+    sed -i "s|#{app_log}|${php_v_unds}|g" "${tmp_file_path}"
+    sed -i "s|#{sys_user}|${USER_CURRENT}|g" "${tmp_file_path}"
+
+    printf "\n"
+
+    # Validate Config
+    if ! sudo nginx -t &>/dev/null; then
+         # We don't want to break if main config is currently broken, but we should warn
+         printf "%b - Warning: Nginx config currently reports errors. Proceeding anyway...\n" "${Msg_Warn}"
+    fi
+
+    sudo mv "${tmp_file_path}" "${SITES_AVAILABLE}/"
+
+    printf "\n%bVirtual Host Created. Want to Enable It? (n/Y): %b" "${Green}" "${Reset}"
+    read -r enable_host
+
+    if [[ "${enable_host}" != "n" && "${enable_host}" != "N" ]]; then
+        sudo ln -s "${SITES_AVAILABLE}/${tmp_conf_file}" "${SITES_ENABLED}/${tmp_conf_file}"
+        
+        if reload_nginx; then
+            printf "\n%b - Access here: %bhttp://localhost:%s%b\n" "${Msg_Info}" "${Col_Value}" "${project_port}" "${Reset}"
+            printf "\n%b - VHost '%s' Enabled Successfully!\n" "${Msg_Success}" "${tmp_conf_file}"
+        fi
+    fi
+
+    exit 0
 }
+
+#-------------------------------------------------------------------------------------------------------
+# MAIN EXECUTION
+#-------------------------------------------------------------------------------------------------------
 
 case "$1" in
-    -c|--create) create_v_host;;
-    -e|--enable) enable_v_host;;
-    -d|--disable) disable_v_host;;
-    -v|--view) open_v_host;;
-    -r|--remove) remove_v_host;;
-    -V|--version) show_version;;
-    -l|--list) list_v_hosts;;
-    -h|--help) vhosts_help;;
-    *) ngx_error "${script_title}\n\n${RED}No Argument Supplied!" $ERROR;
+    -c|--create)  create_v_host ;; 
+    -e|--enable)  enable_v_host ;; 
+    -d|--disable) disable_v_host ;; 
+    -v|--view)    open_v_host ;; 
+    -r|--remove)  remove_v_host ;; 
+    -V|--version) show_version ;; 
+    -l|--list)    list_v_hosts ;; 
+    -h|--help)    vhosts_help ;; 
+    *) 
+        printf "\n%b - Invalid Option or No Argument Supplied.\n" "${Msg_Error}"
+        vhosts_help
+        exit 1
+        ;; 
 esac
-
-#-------------------------------------------------------------------------------------------------------
-    # SCRIPT END
-#-------------------------------------------------------------------------------------------------------

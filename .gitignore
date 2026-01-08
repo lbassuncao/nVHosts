@@ -1,0 +1,140 @@
+# OS generated files #
+####################################################################################
+
+.DS_Store
+.DS_Store?
+._*
+.Trashes
+.directory
+
+# Tool specific files #
+####################################################################################
+
+.env
+
+
+# vim
+*~
+*.xlsx#
+*.swp
+*.swo
+# sublime text & textmate
+*.sublime-*
+*.stTheme.cache
+*.tmlanguage.cache
+*.tmPreferences.cache
+# Eclipse
+.settings/*
+# JetBrains, aka PHPStorm, IntelliJ IDEA
+.idea/*
+# NetBeans
+nbproject/*
+# Visual Studio Code
+.vscode
+# Sass preprocessor
+.sass-cache/
+.cache
+
+venv
+.venv
+__pycache__
+
+# FRONTEND (FLUTTER)
+####################################################################################
+
+# Build e Dependências
+frontend/build/
+frontend/.dart_tool/
+frontend/.pub/
+frontend/.packages
+
+# Android - Ficheiros Sensíveis e Gerados
+frontend/android/local.properties
+frontend/android/.gradle
+frontend/android/app/build
+frontend/android/*.iml
+frontend/android/.idea
+
+# iOS - Ficheiros Gerados
+frontend/ios/Flutter/Generated.xcconfig
+frontend/ios/Flutter/app.flx
+frontend/ios/Flutter/app.zip
+frontend/ios/Flutter/flutter_assets/
+frontend/ios/Pods/
+frontend/ios/.symlinks/
+
+# Web - Ficheiros de Debug
+frontend/.last_build_id
+
+# Configurações de IDE (VS Code / Android Studio) dentro do frontend
+frontend/.vscode/
+frontend/.idea/
+
+# Ficheiros de Erros
+frontend/flutter_*.log
+
+# APP SPECIFIC FILES  #
+####################################################################################
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+uploads/
+eggs/
+.eggs/
+backend/lib/
+backend/lib64/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environment (criado pelo script bash) ---
+venv/
+env/
+ENV/
+bin/
+
+# --- Variáveis de Ambiente & Segredos (SEGURANÇA MÁXIMA) ---
+.env
+.env.*
+!.env.example
+*.json
+!package.json
+# Bloquear especificamente chaves do Google
+gcp-key.json
+service-account.json
+
+# --- Docker & Base de Dados Local ---
+postgres_data/
+docker-compose.override.yml
+
+# --- Supabase Volumes (dados dinâmicos) ---
+volumes/storage/stub/
+volumes/db/data/
+
+# --- IDEs e SO ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+logs/
+
+####################################################################################
