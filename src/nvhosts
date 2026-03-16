@@ -376,8 +376,10 @@ function create_v_host() {
     mkdir -p "${tmp_folder}"
 
     local script_dir
-    script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-    local main_conf="${script_dir}/../templates/default.conf"
+    local user=$(whoami)
+    local home="/home/${user}"
+    script_dir="${home}/.nvhosts"
+    local main_conf="${script_dir}/templates/default.conf"
 
     # Fallback to local path if relative fails
     if [[ ! -f "${main_conf}" ]]; then

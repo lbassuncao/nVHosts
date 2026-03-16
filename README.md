@@ -33,8 +33,8 @@
 
 1.  **Clone the Repository**
     ```bash
-    git clone https://github.com/lbassuncao/nVHosts.git
-    cd nVHosts
+    git clone https://github.com/lbassuncao/nVHosts.git .nvhosts
+    cd ~/.nvhosts
     ```
 
 2.  **Make it Executable**
